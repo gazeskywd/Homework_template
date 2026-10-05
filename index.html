@@ -8,72 +8,393 @@
       content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no"
     />
     <title>Interactive Design (2)</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;800&display=swap"
+      rel="stylesheet"
+    />
     <style>
-      /* 허브 페이지는 절대 스크롤/선택되지 않게 고정 (아이폰에서 터치가 페이지 스크롤로 새는 것 방지) */
+      :root {
+        --ink: #111;
+        --paper: #fff;
+        --gray: #f2f2f2;
+        --line: 1.5px solid var(--ink);
+        --side: clamp(20px, 6vw, 80px); /* 화면 좌우 여백 */
+        --col: 16px; /* 카드 안쪽 여백 (세로선과 글자 사이) */
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       html,
       body {
-        height: 100%;
         margin: 0;
-        overflow: hidden;
-        overscroll-behavior: none;
+        background: var(--paper);
+        color: var(--ink);
+        font-family:
+          "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
         -webkit-user-select: none;
         user-select: none;
         -webkit-touch-callout: none;
-        font-family: sans-serif;
       }
-      /* 왼쪽 메뉴 */
-      #menu {
+
+      /* 과제를 보고 있을 땐 뒤 페이지가 절대 스크롤되지 않게 고정
+         (아이폰에서 터치가 페이지 스크롤로 새는 것 방지) */
+      body.viewing {
         position: fixed;
-        top: 0;
-        left: 0;
-        width: 100px;
-        height: 100%;
-        padding: 20px;
-        box-sizing: border-box;
-        background: #fff;
+        inset: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
       }
-      #menu a {
-        display: block;
-        margin-bottom: 10px;
+
+      /* ---------- 헤더 ---------- */
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        padding: 56px var(--side) 0;
+      }
+      .logo {
+        font-weight: 800;
+        font-size: 56px;
+        line-height: 0.8;
+        letter-spacing: -0.06em;
+      }
+      .header-meta {
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        text-align: right;
+        line-height: 1.5;
+        padding-top: 4px;
+      }
+
+      main {
+        padding: 0 var(--side) 80px;
+      }
+
+      /* ---------- 섹션 제목 ---------- */
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin: 72px 0 0;
+        padding-bottom: 18px;
+        font-size: clamp(36px, 5vw, 56px);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        text-transform: uppercase;
+        line-height: 1;
+      }
+      .badge {
+        flex: none;
+        display: inline-grid;
+        place-items: center;
+        width: 1em;
+        height: 1em;
+        border-radius: 50%;
+        background: var(--ink);
+        color: var(--paper);
+        font-size: 54px;
+      }
+      .badge span {
+        font-size: 0.32em;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
+      .section-title .badge {
+        font-size: 0.95em;
+      }
+
+      /* ---------- 카드 그리드 ----------
+         카드마다 위쪽 가로선 + 왼쪽 세로선.
+         그리드를 왼쪽으로 살짝 밀어서 첫 번째 열의 세로선은 화면 밖으로 숨긴다. */
+      .grid-wrap {
+        overflow: hidden;
+        border-bottom: var(--line);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        margin: 0 calc(var(--col) * -1);
+      }
+      .card {
+        border-top: var(--line);
+        padding: 26px 0 30px;
         cursor: pointer;
-        color: blue;
+        color: inherit;
+        text-decoration: none;
       }
-      /* iframe 영역: 메뉴(100px)를 뺀 나머지 화면 전체 */
-      #stage {
-        position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        left: 100px;
+      .card-inner {
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        border-left: var(--line);
+        padding: 0 var(--col);
+      }
+      .card-title {
+        margin: 0;
+        min-height: 4.2em; /* 제목 3줄 높이를 맞춰서 카드끼리 줄이 맞게 */
+        font-size: 21px;
+        font-weight: 400;
+        line-height: 1.3;
+        text-transform: uppercase;
+      }
+      .card-meta {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        margin-top: auto;
+        padding: 40px 0 8px;
+      }
+      .tags {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        padding-bottom: 8px;
+      }
+      .tags .badge {
+        font-size: 24px;
+      }
+      .card-num {
+        font-size: clamp(44px, 5vw, 58px);
+        font-weight: 400;
+        letter-spacing: -0.03em;
+        line-height: 0.85;
+      }
+      .thumb {
+        position: relative;
+        aspect-ratio: 3 / 2;
+        background: var(--gray);
         overflow: hidden;
       }
-      #viewer {
-        display: block;
+      .thumb img {
+        position: relative;
+        z-index: 1; /* 썸네일이 있으면 번호 위를 덮음 */
         width: 100%;
         height: 100%;
+        object-fit: cover;
+        display: block;
+        transition: transform 0.5s ease;
+      }
+      /* 썸네일이 없을 때 회색 칸에 크게 번호 */
+      .thumb .empty {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        font-size: 64px;
+        font-weight: 800;
+        color: #fff;
+        letter-spacing: -0.04em;
+      }
+      .card:hover .card-title {
+        text-decoration: underline;
+        text-underline-offset: 4px;
+        text-decoration-thickness: 1.5px;
+      }
+      .card:hover .thumb img {
+        transform: scale(1.03);
+      }
+      /* 아직 안 올라간 과제 */
+      .card.soon {
+        cursor: default;
+      }
+      .card.soon .card-title,
+      .card.soon .card-num {
+        color: #b5b5b5;
+      }
+      .card.soon:hover .card-title {
+        text-decoration: none;
+      }
+
+      /* ---------- 과제 보기 화면 (전체 화면) ---------- */
+      #viewer {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: none;
+        flex-direction: column;
+        background: var(--paper);
+      }
+      body.viewing #viewer {
+        display: flex;
+      }
+      .bar {
+        flex: none;
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        align-items: center;
+        height: 52px;
+        padding: 0 20px;
+        border-bottom: var(--line);
+        font-size: 13px;
+        font-weight: 500;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+      }
+      .bar button {
+        all: unset;
+        cursor: pointer;
+        padding: 8px 0;
+      }
+      .bar button:hover {
+        text-decoration: underline;
+        text-underline-offset: 3px;
+      }
+      .bar .nav {
+        justify-self: end;
+        display: flex;
+        gap: 18px;
+      }
+      .bar .now {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      #frame {
+        flex: 1;
+        width: 100%;
         border: 0;
+        display: block;
+      }
+
+      /* ---------- 반응형 ---------- */
+      @media (max-width: 960px) {
+        .grid {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      @media (max-width: 600px) {
+        header {
+          padding-top: 32px;
+        }
+        .logo {
+          font-size: 40px;
+        }
+        .section-title {
+          margin-top: 48px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .card-title {
+          min-height: 0;
+        }
+        .card-meta {
+          padding-top: 24px;
+        }
+        .bar .now {
+          display: none;
+        }
       }
     </style>
   </head>
   <body>
-    <div id="menu">
-      <a onclick="loadHomework('01 Dynamic Balance')">01 Dynamic Balance</a>
-      <a onclick="loadHomework('02 Delete, delete, delete')"
-        >02 Delete, delete, delete</a
-      >
-      <a onclick="loadHomework('Homework3')">Homework3</a>
-    </div>
+    <header>
+      <div class="logo">ID(2)</div>
+      <div class="header-meta">Interactive Design (2)<br />Archive</div>
+    </header>
 
-    <div id="stage">
-      <!-- 처음 열었을 때 보여줄 과제 -->
-      <iframe id="viewer" src="01 Dynamic Balance/index.html"></iframe>
+    <main>
+      <h1 class="section-title">
+        <span class="badge"><span>ID</span></span>
+        Homework
+      </h1>
+      <div class="grid-wrap">
+        <div class="grid" id="grid"></div>
+      </div>
+    </main>
+
+    <!-- 과제 보기 화면 -->
+    <div id="viewer">
+      <div class="bar">
+        <button onclick="closeHomework()">← Index</button>
+        <div class="now" id="now"></div>
+        <div class="nav">
+          <button onclick="step(-1)">Prev</button>
+          <button onclick="step(1)">Next</button>
+        </div>
+      </div>
+      <iframe id="frame" title="homework"></iframe>
     </div>
 
     <script>
-      // 메뉴 클릭 시 iframe에 해당 폴더의 index.html을 불러옴
-      function loadHomework(folderName) {
-        document.getElementById("viewer").src = folderName + "/index.html";
+      // =====================================================
+      // 과제 목록 — 새 과제가 생기면 여기에 한 줄만 추가하면 된다
+      //   folder : 과제 폴더 이름 (그 안의 index.html을 연다)
+      //   thumb  : 썸네일 이미지 (폴더 안의 thumb.png). 없으면 회색 칸으로 표시
+      //   soon   : true면 아직 준비 중 (클릭 안 됨)
+      // =====================================================
+      const WORKS = [
+        { num: "01", title: "Dynamic Balance", folder: "01 Dynamic Balance" },
+        {
+          num: "02",
+          title: "Delete, Delete, Delete",
+          folder: "02 Delete, delete, delete",
+        },
+        { num: "03", title: "Homework 3", folder: "Homework3", soon: true },
+      ];
+
+      let current = -1;
+
+      // 카드 만들기
+      const grid = document.getElementById("grid");
+      WORKS.forEach((w, i) => {
+        const card = document.createElement("a");
+        card.className = "card" + (w.soon ? " soon" : "");
+        card.innerHTML = `
+          <div class="card-inner">
+            <h2 class="card-title">${w.title}</h2>
+            <div class="card-meta">
+              <div class="tags">
+                <span class="badge"><span>ID</span></span>
+                ${w.soon ? "Coming soon" : "Homework"}
+              </div>
+              <div class="card-num">${w.num}</div>
+            </div>
+            <div class="thumb">
+              <div class="empty">${w.num}</div>
+              ${w.soon ? "" : `<img src="${w.folder}/thumb.png" alt="" onerror="this.remove()" />`}
+            </div>
+          </div>`;
+        if (!w.soon) card.onclick = () => openHomework(i);
+        grid.appendChild(card);
+      });
+
+      // 과제 열기 — iframe에 해당 폴더의 index.html을 불러옴
+      function openHomework(i) {
+        current = i;
+        const w = WORKS[i];
+        document.getElementById("frame").src = w.folder + "/index.html";
+        document.getElementById("now").textContent = w.num + " — " + w.title;
+        document.body.classList.add("viewing");
+        history.replaceState(null, "", "#" + w.num); // 새로고침해도 이 과제가 열림
       }
+
+      function closeHomework() {
+        document.body.classList.remove("viewing");
+        document.getElementById("frame").src = "about:blank"; // 과제 실행 멈춤
+        history.replaceState(null, "", location.pathname);
+        current = -1;
+      }
+
+      // 이전 / 다음 과제 (준비 중인 과제는 건너뜀)
+      function step(dir) {
+        const ready = WORKS.map((w, i) => i).filter((i) => !WORKS[i].soon);
+        const pos = ready.indexOf(current);
+        openHomework(ready[(pos + dir + ready.length) % ready.length]);
+      }
+
+      // 주소에 #02 처럼 번호가 있으면 그 과제를 바로 연다
+      const start = WORKS.findIndex((w) => "#" + w.num === location.hash);
+      if (start >= 0 && !WORKS[start].soon) openHomework(start);
     </script>
   </body>
 </html>
