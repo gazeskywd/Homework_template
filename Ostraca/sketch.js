@@ -340,7 +340,11 @@ const camX = () => (mode === "strata" ? 0 : scrollX);
 let scrollY = 0,
   followTop = true,
   pileTopSm = null;
-const camY = () => (mode === "strata" ? scrollY : 0);
+// columns get their own vertical scroll when a column grows taller than the screen
+let binY = 0,
+  binMin = 0,
+  binFollow = true;
+const camY = () => (mode === "strata" ? scrollY : binY);
 const ptr = {
   x: -999,
   y: -999,
@@ -416,9 +420,13 @@ function mouseWheel(e) {
     followTop = false;
     return false;
   }
-  if (view === "pile" && mode !== "strata" && maxScroll > 0) {
-    const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
-    scrollX = constrain(scrollX + d, 0, maxScroll);
+  if (view === "pile" && mode !== "strata" && (maxScroll > 0 || binMin < 0)) {
+    if (Math.abs(e.deltaX) > Math.abs(e.deltaY))
+      scrollX = constrain(scrollX + e.deltaX, 0, maxScroll);
+    else if (binMin < 0) {
+      binY = constrain(binY + e.deltaY, binMin, 0);
+      binFollow = false;
+    } else scrollX = constrain(scrollX + e.deltaY, 0, maxScroll);
     return false;
   }
 }
@@ -707,6 +715,9 @@ function stepPhysics() {
   if (mode === "strata") {
     if (followTop) scrollY += (camTop() - scrollY) * 0.08;
     scrollY = constrain(scrollY, camTop(), 0);
+  } else {
+    if (binFollow) binY += (binMin - binY) * 0.08;
+    binY = constrain(binY, binMin, 0);
   }
 
   // now and then, one buried fragment twitches as if something is down there
@@ -751,10 +762,12 @@ function setMode(m) {
     // columns were drawn shifted by the scroll; bring that into the stones' positions first
     stones.forEach((st) => {
       st.disp.x -= scrollX;
-      st.disp.y += scrollY;
+      st.disp.y += scrollY - binY;
     });
     scrollX = 0;
     maxScroll = 0;
+    binY = 0;
+    binMin = 0;
     // slide every stone back to where it lay in the pile, then let physics take over again
     let i = 0,
       longest = 0;
@@ -798,9 +811,12 @@ function setMode(m) {
     } else {
       stones.forEach((st) => {
         st.disp.x -= scrollX;
+        st.disp.y -= binY;
       });
     }
     scrollX = 0;
+    binY = 0;
+    binFollow = false; // columns start at the floor, where every stack begins
     arrangeBins(true);
   }
 }
@@ -841,8 +857,11 @@ function arrangeBins(animate) {
   const top = headerH + (width < 620 ? 96 : 70);
   const availH = floorY() - top - 40;
   const maxC = Math.max(1, ...list.map((b) => b.count));
-  const bh = constrain(availH / maxC / 0.92, 16, 54);
+  const bh = constrain(availH / maxC / 0.92, 24, 54);
   const step = bh * 0.92;
+  // a column taller than the screen scrolls up and down
+  binMin = -Math.max(0, maxC * step + bh * 0.08 + 6 - availH);
+  binY = constrain(binY, binMin, 0);
 
   bins = [];
   let i = 0;
@@ -978,6 +997,18 @@ function drawPile() {
 
   // sand, stones and the floor scroll with the camera
   push();
+  const clipped = mode !== "strata" && bins.length;
+  if (clipped) {
+    drawingContext.save();
+    drawingContext.beginPath();
+    drawingContext.rect(
+      0,
+      bins[0].top + 30,
+      width,
+      floorY() - bins[0].top - 30,
+    );
+    drawingContext.clip();
+  }
   translate(-camX(), -camY());
   noStroke();
   sandBodies.forEach((g, i) => {
@@ -988,6 +1019,7 @@ function drawPile() {
     updateDisp(st);
     drawStone(st);
   });
+  if (clipped) drawingContext.restore();
   pop();
   stroke(INK);
   strokeWeight(STROKE);
@@ -1017,15 +1049,15 @@ function drawPile() {
   });
 
   // how deep you are in the pile, when it's taller than the screen
-  const ct = camTop();
-  if (mode === "strata" && ct < -4) {
+  const ct = mode === "strata" ? camTop() : binMin;
+  if (ct < -4) {
     const x = width - 8,
-      y0 = headerH + 14,
+      y0 = (mode === "strata" ? headerH : bins[0].top + 30) + 14,
       y1 = floorY() - 14;
     const span = y1 - y0;
     const vis = span / (span - ct);
     const thumb = Math.max(36, span * vis);
-    const at = y0 + (span - thumb) * (1 - scrollY / ct);
+    const at = y0 + (span - thumb) * (1 - camY() / ct);
     stroke(SOIL);
     strokeWeight(3);
     line(x, y0, x, y1);
@@ -1035,7 +1067,10 @@ function drawPile() {
     textSize(12);
     textAlign(RIGHT, CENTER);
     fill(MUTE);
-    const hint = scrollY > ct * 0.98 + 2 ? "" : "Scroll down to dig deeper";
+    const hint =
+      mode !== "strata" || scrollY > ct * 0.98 + 2
+        ? ""
+        : "Scroll down to dig deeper";
     if (hint && width - 16 - textWidth(hint) > 16 + textWidth(resetLabel) + 24)
       text(hint, width - 16, floorY() + 15);
   }
@@ -2711,6 +2746,11 @@ function onMove(e) {
     !ptr.downBtn
   ) {
     scrollX = constrain(scrollX - (x - ptr.lastX), 0, maxScroll);
+    const dy = y - ptr.lastY;
+    if (dy && binMin < 0) {
+      binY = constrain(binY - dy, binMin, 0);
+      binFollow = false;
+    }
   }
   if (
     view === "pile" &&
