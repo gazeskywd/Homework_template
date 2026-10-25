@@ -10,7 +10,9 @@
  * Recall:  tap a fragment. The film's pieces fly back into their vessel, then it breaks
  *          open into fragments laid side by side. The one under your finger grows.
  * Edit:    rewrite a fragment in place.
- * Delete:  hold a fragment to grind it to sand. The sand sinks into the pile.
+ * Delete:  rub in circles over a fragment to grind it. Cracks spread with each turn;
+ *          after about three turns it shatters and sinks into the pile as sand.
+ *          Let go halfway and the cracks slowly close again.
  */
 
 const Engine = Matter.Engine;
@@ -53,7 +55,7 @@ const WEAR_DAYS = 330; // time alone: left this long, a fragment is mostly burie
 const DEPTH_WEAR = 0.045; // each film piled on top adds this much dirt
 const BRUSH_PX = 480; // finger travel needed to brush a fully buried fragment clean
 const MAX_PIECES = 8;
-const STORE_KEY = "ostraca.p5.v1";
+const STORE_KEY = "ostraca.p5.v3";
 
 const VTYPES = ["plate", "jar", "bowl", "tile"];
 const PROMPTS = [
@@ -229,6 +231,84 @@ const SEED = [
       [3, "Concrete, glass, late-afternoon light."],
     ],
   },
+  {
+    t: "The Green Ray",
+    d: "Éric Rohmer",
+    y: 1986,
+    w: "2025-08-03",
+    c: "#3E9B5A",
+    l: 1,
+    m: [
+      [0, "The very last second of the sunset turns green, and she cries out."],
+      [6, "Green playing cards lying face down on the street."],
+      [1, "Crying alone on a rock while everyone else is on holiday."],
+      [4, "Lonely, then suddenly hopeful."],
+    ],
+  },
+  {
+    t: "Dead Ringers",
+    d: "David Cronenberg",
+    y: 1988,
+    w: "2024-10-19",
+    c: "#A3192E",
+    l: 2,
+    m: [
+      [3, "Surgeons in blood-red gowns, like a ceremony."],
+      [6, "Strange metal instruments laid out on a cloth."],
+      [0, "Two of them, and I kept losing track of which one was which."],
+    ],
+  },
+  // watched today
+  {
+    t: "Farewell My Concubine",
+    d: "Chen Kaige",
+    y: 1993,
+    w: "2026-10-25T13:00:00",
+    c: "#E5262A",
+    l: 1,
+    m: [
+      [
+        0,
+        "The sword at the very end, on an empty stage. Fifty years in one gesture.",
+      ],
+      [
+        1,
+        "A boy made to repeat one line until he finally says it the way they want.",
+      ],
+      [3, "White face paint, red smudged around the eyes."],
+      [4, "Couldn't say anything for a while after."],
+    ],
+  },
+  {
+    t: "Ghost in the Shell",
+    d: "Mamoru Oshii",
+    y: 1995,
+    w: "2026-10-25T17:00:00",
+    c: "#2D5BA8",
+    l: 2,
+    m: [
+      [0, "The long, wordless ride through the city in the rain."],
+      [5, "That chanting choir rising over the canals."],
+      [6, "Mannequins in shop windows, looking back at her."],
+    ],
+  },
+  {
+    t: "Eureka",
+    d: "Shinji Aoyama",
+    y: 2000,
+    w: "2026-10-25T21:00:00",
+    c: "#EDE03A",
+    l: 1,
+    m: [
+      [0, "Right at the end, the colour comes back. I actually gasped."],
+      [3, "Almost four hours in faded sepia."],
+      [
+        1,
+        "The old bus rolling along with the three of them, going nowhere in particular.",
+      ],
+      [4, "Quiet, like the morning after a long cry."],
+    ],
+  },
 ];
 
 /* ---------- State ---------- */
@@ -243,6 +323,8 @@ let walls = [];
 let bins = []; // column labels and dividers while sorted
 let pourQueue = [];
 let particles = [];
+let chunks = []; // pieces of a fragment that was just ground down
+const GRIND_TURNS = 3; // full circles needed to grind a fragment away
 let buttons = [];
 let toastMsg = "",
   toastUntil = 0;
@@ -253,6 +335,12 @@ let settlingUntil = 0; // after sliding back into the pile, physics resumes at t
 let scrollX = 0,
   maxScroll = 0; // sideways scroll through the columns
 const camX = () => (mode === "strata" ? 0 : scrollX);
+// vertical camera for the pile: 0 shows the floor; negative values look up the pile.
+// It follows the top of the pile (the newest films) until you scroll yourself.
+let scrollY = 0,
+  followTop = true,
+  pileTopSm = null;
+const camY = () => (mode === "strata" ? scrollY : 0);
 const ptr = {
   x: -999,
   y: -999,
@@ -323,6 +411,11 @@ function windowResized() {
 }
 
 function mouseWheel(e) {
+  if (view === "pile" && mode === "strata" && camTop() < 0) {
+    scrollY = constrain(scrollY + e.deltaY, camTop(), 0);
+    followTop = false;
+    return false;
+  }
   if (view === "pile" && mode !== "strata" && maxScroll > 0) {
     const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     scrollX = constrain(scrollX + d, 0, maxScroll);
@@ -372,7 +465,9 @@ function filmFromSpec(spec, idx) {
     crack(pieces, [c[0] + (r() - 0.5) * 40, c[1] + (r() - 0.5) * 40], r);
   }
   pieces.sort((a, b) => area(b) - area(a));
-  const watched = Date.parse(spec.w + "T21:00:00");
+  const watched = Date.parse(
+    spec.w.includes("T") ? spec.w : spec.w + "T21:00:00",
+  );
   const id = "f" + hash(spec.t).toString(36);
   return {
     id,
@@ -380,7 +475,7 @@ function filmFromSpec(spec, idx) {
     director: spec.d,
     year: spec.y,
     watched,
-    color: PALETTE[idx % PALETTE.length],
+    color: spec.c || PALETTE[idx % PALETTE.length],
     vtype,
     sand: 0,
     shards: spec.m.map(([k, text], i) => ({
@@ -443,10 +538,10 @@ function buildWalls() {
       isStatic: true,
       friction: 1,
     }),
-    Bodies.rectangle(12 - T / 2, height / 2 - height, T, height * 4, {
+    Bodies.rectangle(12 - T / 2, -height * 19, T, height * 40, {
       isStatic: true,
     }),
-    Bodies.rectangle(width - 12 + T / 2, height / 2 - height, T, height * 4, {
+    Bodies.rectangle(width - 12 + T / 2, -height * 19, T, height * 40, {
       isStatic: true,
     }),
   ];
@@ -511,6 +606,7 @@ function makeStone(f, s, x, y) {
 }
 
 function addStone(st) {
+  st.born = frameCount;
   stones.set(st.sid, st);
   Composite.add(engine.world, st.body);
 }
@@ -522,12 +618,30 @@ function removeStone(sid) {
   wakeAll();
 }
 
+function pileTop() {
+  let top = floorY();
+  stones.forEach((st) => {
+    const b = st.body;
+    // ignore stones still falling (a stone that just appeared hasn't started moving yet)
+    if (frameCount - (st.born || 0) < 60) return;
+    if (Math.hypot(b.velocity.x, b.velocity.y) < 1.5)
+      top = Math.min(top, b.bounds.min.y);
+  });
+  return top;
+}
+// anything dropped onto the pile starts just above it, never inside it
+const dropY = () => Math.min(-80, pileTop() - 160);
+// the highest the camera goes: the pile's top sits just under the intro text
+const camTop = () =>
+  Math.min(0, (pileTopSm === null ? pileTop() : pileTopSm) - (headerH + 110));
+
 function addSand(n, x) {
+  const y0 = dropY();
   for (let i = 0; i < n; i++) {
     if (sandBodies.length > 120) return;
     const g = Bodies.circle(
       x + random(-60, 60),
-      -20 - random(80),
+      y0 + 60 - random(80),
       random(2.2, 3.6) * S,
       { friction: 0.6, restitution: 0, density: 0.001 },
     );
@@ -580,22 +694,48 @@ function prewarm() {
 }
 
 function stepPhysics() {
-  while (pourQueue.length && pourQueue[0].at <= frameCount)
-    addStone(pourQueue.shift().stone);
+  while (pourQueue.length && pourQueue[0].at <= frameCount) {
+    const st = pourQueue.shift().stone;
+    const y = dropY() - random(60);
+    Body.setPosition(st.body, { x: st.body.position.x, y });
+    st.disp.y = y;
+    addStone(st);
+  }
+  // camera: follow the top of the pile, smoothly
+  const pt = pileTop();
+  pileTopSm = pileTopSm === null ? pt : pileTopSm + (pt - pileTopSm) * 0.05;
+  if (mode === "strata") {
+    if (followTop) scrollY += (camTop() - scrollY) * 0.08;
+    scrollY = constrain(scrollY, camTop(), 0);
+  }
 
   // now and then, one buried fragment twitches as if something is down there
-  if (mode === "strata" && !brushOn && millis() > nextPeek) {
-    nextPeek = millis() + 3800;
+  // drawn only: it doesn't push the stone, so nothing around it moves
+  if (
+    mode === "strata" &&
+    !brushOn &&
+    millis() > nextPeek &&
+    pourQueue.length === 0
+  ) {
+    nextPeek = millis() + 6500;
     const deep = [];
     stones.forEach((st) => {
       const [f, s] = findShard(st.sid);
-      if (f && wear(f, s) > 0.55) deep.push(st.body);
+      if (f && wear(f, s) > 0.55) deep.push(st);
     });
     if (deep.length) {
-      const b = random(deep);
-      Sleeping.set(b, false);
-      Body.setAngularVelocity(b, random([-1, 1]) * 0.05);
-      Body.setVelocity(b, { x: 0, y: -1.6 });
+      const st = random(deep);
+      st.peek = millis();
+      for (let k = 0; k < 6; k++)
+        particles.push({
+          x: st.disp.x + random(-20, 20),
+          y: st.disp.y - camY() - st.h * 0.3,
+          vx: random(-1, 1),
+          vy: random(-2.2, -0.8),
+          life: 1,
+          c: random() < 0.5 ? SOIL : SOIL_DARK,
+          r: random(2, 3.5),
+        });
     }
   }
   if (mode === "strata" && millis() > settlingUntil)
@@ -611,6 +751,7 @@ function setMode(m) {
     // columns were drawn shifted by the scroll; bring that into the stones' positions first
     stones.forEach((st) => {
       st.disp.x -= scrollX;
+      st.disp.y += scrollY;
     });
     scrollX = 0;
     maxScroll = 0;
@@ -650,6 +791,9 @@ function setMode(m) {
       });
       pourQueue.forEach((q) => {
         q.stone.home = null;
+      });
+      stones.forEach((st) => {
+        st.disp.y -= scrollY;
       });
     } else {
       stones.forEach((st) => {
@@ -832,23 +976,27 @@ function drawPile() {
 
   pop();
 
-  // sand
+  // sand, stones and the floor scroll with the camera
+  push();
+  translate(-camX(), -camY());
   noStroke();
   sandBodies.forEach((g, i) => {
     fill(i % 3 ? SOIL : SOIL_DARK);
     circle(g.position.x, g.position.y, g.circleRadius * 2);
   });
-
-  // stones
-  push();
-  translate(-camX(), 0);
   stones.forEach((st) => {
     updateDisp(st);
     drawStone(st);
   });
   pop();
+  stroke(INK);
+  strokeWeight(STROKE);
+  line(0, floorY() - camY(), width, floorY() - camY());
 
-  // floor
+  // footer stays put
+  noStroke();
+  fill(BG);
+  rect(0, floorY(), width, height - floorY());
   stroke(INK);
   strokeWeight(STROKE);
   line(0, floorY(), width, floorY());
@@ -867,6 +1015,30 @@ function drawPile() {
     w: textWidth(resetLabel) + 16,
     h: 28,
   });
+
+  // how deep you are in the pile, when it's taller than the screen
+  const ct = camTop();
+  if (mode === "strata" && ct < -4) {
+    const x = width - 8,
+      y0 = headerH + 14,
+      y1 = floorY() - 14;
+    const span = y1 - y0;
+    const vis = span / (span - ct);
+    const thumb = Math.max(36, span * vis);
+    const at = y0 + (span - thumb) * (1 - scrollY / ct);
+    stroke(SOIL);
+    strokeWeight(3);
+    line(x, y0, x, y1);
+    stroke(INK);
+    line(x, at, x, at + thumb);
+    noStroke();
+    textSize(12);
+    textAlign(RIGHT, CENTER);
+    fill(MUTE);
+    const hint = scrollY > ct * 0.98 + 2 ? "" : "Scroll down to dig deeper";
+    if (hint && width - 16 - textWidth(hint) > 16 + textWidth(resetLabel) + 24)
+      text(hint, width - 16, floorY() + 15);
+  }
 
   // scroll position, when the columns run past the screen
   if (mode !== "strata" && maxScroll > 0) {
@@ -894,6 +1066,7 @@ function drawPile() {
   }
 
   drawParticles();
+  drawChunks();
   drawHeader();
 }
 
@@ -982,7 +1155,13 @@ function drawStone(st) {
 
   push();
   translate(d.x, d.y);
-  rotate(d.a);
+  let shiver = 0;
+  if (st.peek) {
+    const pt = (millis() - st.peek) / 700;
+    if (pt < 1) shiver = Math.sin(pt * PI * 6) * 0.045 * (1 - pt);
+    else st.peek = 0;
+  }
+  rotate(d.a + shiver);
   push();
   scale(d.kx, d.ky);
   image(g, -st.ox, -st.oy);
@@ -1291,7 +1470,7 @@ function drawBrush(x, y) {
 }
 
 function brushAt(x, y, dist) {
-  const st = stoneAt(x + camX(), y);
+  const st = stoneAt(x + camX(), y + camY());
   if (!st) return;
   const [f, s] = findShard(st.sid);
   if (!f || wear(f, s) <= 0.001) return;
@@ -1373,7 +1552,7 @@ function openRecall(f, sid) {
         return { x: random(width), y: height + 100, a: random(-1, 1), k: 0.3 };
       return {
         x: st.disp.x - camX(),
-        y: st.disp.y,
+        y: st.disp.y - camY(),
         a: st.disp.a,
         k: constrain((st.w * st.disp.kx) / ((bb.w || 1) * L.vs), 0.15, 2),
       };
@@ -1383,7 +1562,7 @@ function openRecall(f, sid) {
       0,
       f.shards.findIndex((s) => s.id === sid),
     ),
-    hold: null,
+    grind: null,
     editing: -1,
     removing: null,
   };
@@ -1471,6 +1650,9 @@ function drawRecall() {
       saveData();
     }
   } else if (rc.phase === "open" || rc.phase === "closing") drawPanels(L, t);
+  drawChunks();
+  drawParticles();
+  if (!rc) return; // the last fragment was ground away and recall closed itself
 
   // hint
   noStroke();
@@ -1480,7 +1662,7 @@ function drawRecall() {
   textAlign(CENTER, CENTER);
   const hint =
     rc.phase === "open"
-      ? "Drag across to look closer · Hold a fragment to grind it to sand · Edit to rewrite it"
+      ? "Drag across to look closer · Rub in circles to grind a fragment to sand · Edit to rewrite it"
       : rc.phase === "closing"
         ? ""
         : "Tap the vessel to break it open";
@@ -1633,15 +1815,21 @@ function drawPanels(L, t) {
   f.shards.forEach((s, i) => {
     const r = rects[i];
     if (r.w < 2) return;
+    if (rc.removing && rc.removing.i === i) return; // already in pieces
     const tone = rc.tn[i];
+    const g = rc.grind && rc.grind.i === i ? rc.grind : null;
+    const gp = g ? g.prog : 0;
     const ctx = drawingContext;
     ctx.save();
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
+    // grinding makes the whole fragment shudder
+    push();
+    if (gp > 0) translate(random(-1, 1) * gp * 5, random(-1, 1) * gp * 3);
     noStroke();
     fill(tone);
-    rect(r.x, r.y, r.w, r.h);
+    rect(r.x - 6, r.y - 6, r.w + 12, r.h + 12);
 
     const ink = color(inkOn(tone));
     fill(ink);
@@ -1651,7 +1839,7 @@ function drawPanels(L, t) {
     text(s.kind.toUpperCase(), r.x + 18, r.y + 20);
 
     if (rc.editing !== i) {
-      const a = i === best ? 255 : 120;
+      const a = (i === best ? 255 : 120) * (1 - gp * 0.6);
       ink.setAlpha(a);
       fill(ink);
       const size =
@@ -1712,21 +1900,32 @@ function drawPanels(L, t) {
       drawButton("ed:cancel", "Cancel", bx + 84, by, 90, 40, "ghost");
     }
 
-    // holding: sand rises from the bottom
-    if (rc.hold && rc.hold.i === i) {
-      const p = constrain((millis() - rc.hold.t0) / 1300, 0, 1);
-      const hh = r.h * p;
+    // grinding: cracks spread from where you rub, dust piles up at the bottom
+    if (gp > 0) {
+      const dim = color(INK);
+      dim.setAlpha(110 * gp);
+      noStroke();
+      fill(dim);
+      rect(r.x - 6, r.y - 6, r.w + 12, r.h + 12);
+      stroke(inkOn(tone));
+      strokeWeight(STROKE);
+      noFill();
+      g.cracks.forEach((c) => {
+        const n = Math.ceil(c.length * Math.min(1, gp * 1.5 + 0.08));
+        beginShape();
+        for (let k = 0; k < n; k++) vertex(g.cx + c[k][0], g.cy + c[k][1]);
+        endShape();
+      });
+      noStroke();
+      const hh = 56 * gp;
       fill(SOIL);
-      rect(r.x, r.y + r.h - hh, r.w, hh);
+      rect(r.x, r.y + r.h - hh, r.w, hh + 6);
       fill(SOIL_DARK);
-      for (let yy = r.y + r.h - hh + 3; yy < r.y + r.h; yy += 7)
-        for (let xx = r.x + ((yy / 7) % 2) * 3; xx < r.x + r.w; xx += 7)
-          circle(xx, yy, 2);
-      if (p >= 1) {
-        rc.hold = null;
-        grind(i);
-      }
+      for (let yy = r.y + r.h - hh + 3; yy < r.y + r.h; yy += 6)
+        for (let xx = r.x + ((yy / 6) % 2) * 3; xx < r.x + r.w; xx += 6)
+          circle(xx, yy, 1.8);
     }
+    pop();
     ctx.restore();
   });
 
@@ -1742,7 +1941,146 @@ function drawPanels(L, t) {
       k: 0.6,
     }));
   }
-  if (rc.removing && millis() - rc.removing.t0 > 450) finishGrind();
+  if (rc.grind) {
+    const g = rc.grind;
+    if (g.prog >= 1) {
+      shatter(g.i);
+      rc.grind = null;
+    } else if (!g.active) {
+      // let go too early: the cracks slowly close up again
+      g.prog -= 0.012;
+      if (g.prog <= 0) rc.grind = null;
+    } else if (!g.hinted && g.prog < 0.02 && millis() - g.t0 > 700) {
+      g.hinted = true;
+      toast("Rub in circles to grind it down.");
+    }
+  }
+  if (rc.removing && millis() - rc.removing.t0 > 650) finishGrind();
+}
+
+function startGrind(i, x, y) {
+  const r = rc.rects[i];
+  const cracks = [];
+  for (let k = 0; k < 9; k++) {
+    let a = (k / 9) * TWO_PI + random(-0.3, 0.3),
+      px = 0,
+      py = 0;
+    const pts = [[0, 0]];
+    const segs = 6 + Math.floor(random(4));
+    for (let j = 0; j < segs; j++) {
+      a += random(-0.5, 0.5);
+      const len = random(18, 46) * (r.h / 600 + 0.6);
+      px += Math.cos(a) * len;
+      py += Math.sin(a) * len;
+      pts.push([px, py]);
+    }
+    cracks.push(pts);
+  }
+  const keep = rc.grind && rc.grind.i === i ? rc.grind.prog : 0;
+  rc.grind = {
+    i,
+    cx: x,
+    cy: y,
+    pts: [[x, y]],
+    lastAng: null,
+    prog: keep,
+    active: true,
+    t0: millis(),
+    hinted: false,
+    cracks: keep ? rc.grind.cracks : cracks,
+  };
+}
+
+function rubGrind(x, y) {
+  const g = rc.grind;
+  g.pts.push([x, y]);
+  if (g.pts.length > 24) g.pts.shift();
+  // the centre of the circle is wherever the finger has been circling lately
+  let cx = 0,
+    cy = 0;
+  g.pts.forEach((p) => {
+    cx += p[0];
+    cy += p[1];
+  });
+  cx /= g.pts.length;
+  cy /= g.pts.length;
+  const rad = Math.hypot(x - cx, y - cy);
+  if (rad < 10) {
+    g.lastAng = null;
+    return;
+  }
+  const ang = Math.atan2(y - cy, x - cx);
+  if (g.lastAng !== null) {
+    let d = ang - g.lastAng;
+    if (d > PI) d -= TWO_PI;
+    if (d < -PI) d += TWO_PI;
+    g.prog = Math.min(1, g.prog + Math.abs(d) / (TWO_PI * GRIND_TURNS));
+    for (let k = 0; k < Math.min(3, Math.ceil(Math.abs(d) * 6)); k++) {
+      particles.push({
+        x: x + random(-10, 10),
+        y: y + random(-6, 6),
+        vx: random(-1.4, 1.4),
+        vy: random(-1.2, 0.6),
+        life: 1,
+        c: random() < 0.5 ? SOIL : SOIL_DARK,
+        r: random(2, 4),
+      });
+    }
+  }
+  g.lastAng = ang;
+}
+
+// The fragment breaks into pieces that fall away; then it sinks into the pile as sand.
+function shatter(i) {
+  const r = rc.rects[i];
+  const tone = rc.tn[i];
+  const cols = 6,
+    rows = 8;
+  const cw = r.w / cols,
+    ch = r.h / rows;
+  for (let a = 0; a < cols; a++)
+    for (let b = 0; b < rows; b++) {
+      const x = r.x + a * cw + cw / 2,
+        y = r.y + b * ch + ch / 2;
+      chunks.push({
+        x,
+        y,
+        w: cw * random(0.6, 1),
+        h: ch * random(0.6, 1),
+        vx: (x - (r.x + r.w / 2)) * 0.03 + random(-1.5, 1.5),
+        vy: random(-5, -1),
+        a: 0,
+        va: random(-0.12, 0.12),
+        c: random() < 0.25 ? SOIL : tone,
+      });
+    }
+  grind(i);
+}
+
+function drawChunks() {
+  noStroke();
+  for (let k = chunks.length - 1; k >= 0; k--) {
+    const c = chunks[k];
+    c.vy += 0.45;
+    c.x += c.vx;
+    c.y += c.vy;
+    c.a += c.va;
+    if (c.y > height + 80) {
+      chunks.splice(k, 1);
+      continue;
+    }
+    push();
+    translate(c.x, c.y);
+    rotate(c.a);
+    fill(c.c);
+    beginShape();
+    vertex(-c.w / 2, -c.h / 2);
+    vertex(c.w / 2, -c.h * 0.3);
+    vertex(c.w * 0.4, c.h / 2);
+    vertex(-c.w / 2, c.h * 0.4);
+    endShape(CLOSE);
+    pop();
+  }
 }
 
 function setFocusFromPointer(x, y) {
@@ -2062,20 +2400,24 @@ function drawMake() {
     const mc = centroid(moved);
     const [mx, my] = fromVessel(L, mc);
     const fe = easeIn(constrain(fallT * 1.3 - i * 0.05, 0, 1));
+    // the piece being written on grows a little; the others step back
+    if (!mk.sc) mk.sc = [];
+    const target = mk.step === 3 && !mk.done ? (i === mk.i ? 1.12 : 0.9) : 1;
+    mk.sc[i] =
+      mk.sc[i] === undefined ? 1 : mk.sc[i] + (target - mk.sc[i]) * 0.14;
+    const sc = mk.sc[i];
+    const lift = (sc - 1) * 0.9; // the grown piece also eases away from the centre
     push();
-    translate(mx, my + fe * height);
+    translate(mx + (mx - L.cx) * lift, my + (my - L.cy) * lift + fe * height);
     rotate(fe * (i % 2 ? 0.8 : -0.8));
+    scale(sc);
     const col = color(f.color);
     const written = mk.step === 3 && (mk.texts[i] || "").trim();
-    if (mk.step === 3 && i !== mk.i && !written) col.setAlpha(60);
+    if (mk.step === 3 && i !== mk.i && !written)
+      col.setAlpha(map(sc, 0.9, 1.12, 70, 255, true));
     fill(col);
-    if (mk.step === 3 && i === mk.i && !mk.done) {
-      stroke(INK);
-      strokeWeight(4);
-    } else {
-      stroke(BG);
-      strokeWeight(3);
-    }
+    stroke(BG);
+    strokeWeight(3 / sc);
     strokeJoin(ROUND);
     beginShape();
     moved.forEach((p) => vertex((p[0] - mc[0]) * L.vs, (p[1] - mc[1]) * L.vs));
@@ -2084,7 +2426,7 @@ function drawMake() {
       noStroke();
       fill(inkOn(f.color));
       textStyle(BOLD);
-      textSize(12);
+      textSize(12 / sc);
       textAlign(CENTER, CENTER);
       text(written.length > 16 ? written.slice(0, 15) + "…" : written, 0, 0);
     }
@@ -2195,6 +2537,7 @@ function drawMake() {
 
 function startWriting() {
   mk.pieces.sort((a, b) => area(b) - area(a));
+  mk.sc = [];
   mk.texts = mk.pieces.map(() => "");
   mk.i = 0;
   mk.step = 3;
@@ -2283,6 +2626,7 @@ function finishMake() {
       t += 8;
     });
   };
+  followTop = true;
   if (mode !== "strata") {
     setMode("strata");
     setTimeout(drop, 1000);
@@ -2332,7 +2676,7 @@ function onDown(e) {
   ) {
     setFocusFromPointer(x, y);
     const i = panelAt(x, y);
-    if (i >= 0) rc.hold = { i, t0: millis(), x, y };
+    if (i >= 0) startGrind(i, x, y);
   }
 
   if (view === "make" && mk && !mk.done) {
@@ -2368,6 +2712,19 @@ function onMove(e) {
   ) {
     scrollX = constrain(scrollX - (x - ptr.lastX), 0, maxScroll);
   }
+  if (
+    view === "pile" &&
+    mode === "strata" &&
+    !brushOn &&
+    ptr.down &&
+    !ptr.downBtn
+  ) {
+    const dy = y - ptr.lastY;
+    if (Math.abs(dy) > 0) {
+      scrollY = constrain(scrollY - dy, camTop(), 0);
+      followTop = false;
+    }
+  }
   ptr.x = x;
   ptr.y = y;
   if (e.pointerType === "mouse") ptr.seen = true;
@@ -2379,9 +2736,15 @@ function onMove(e) {
     brushAt(x, y, dist);
 
   if (view === "recall" && rc) {
-    if (ptr.down || e.pointerType === "mouse") setFocusFromPointer(x, y);
-    if (rc.hold && Math.hypot(x - rc.hold.x, y - rc.hold.y) > 14)
-      rc.hold = null;
+    const g = rc.grind && rc.grind.active ? rc.grind : null;
+    // once a fragment is cracking, stay on it; otherwise follow the finger across panels
+    if (!(g && g.prog > 0.06) && (ptr.down || e.pointerType === "mouse"))
+      setFocusFromPointer(x, y);
+    if (g && ptr.down && !rc.removing) {
+      const i = panelAt(x, y);
+      if (i >= 0 && i !== g.i && g.prog < 0.06) startGrind(i, x, y);
+      else rubGrind(x, y);
+    }
   }
 }
 
@@ -2390,7 +2753,7 @@ function onUp(e) {
   ptr.down = false;
   const x = e.clientX,
     y = e.clientY;
-  if (rc) rc.hold = null;
+  if (rc && rc.grind) rc.grind.active = false;
   if (e.pointerType !== "mouse" && brushOn) ptr.seen = false;
   if (brushOn) saveData();
 
@@ -2402,7 +2765,7 @@ function onUp(e) {
   }
 
   if (view === "pile" && ptr.moved < 10) {
-    const st = stoneAt(x + camX(), y);
+    const st = stoneAt(x + camX(), y + camY());
     if (!st) return;
     const [f, s] = findShard(st.sid);
     if (!f) return;
@@ -2448,6 +2811,9 @@ function onButton(id) {
         mode = "strata";
         scrollX = 0;
         maxScroll = 0;
+        scrollY = 0;
+        followTop = true;
+        pileTopSm = null;
         pourIn();
         toast("The demo pile is back.");
       } else resetArmedUntil = millis() + 3000;
